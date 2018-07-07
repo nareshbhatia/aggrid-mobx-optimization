@@ -12,7 +12,7 @@ export class OrderStore {
         [7, new Order(7, 70)],
         [8, new Order(8, 80)],
         [9, new Order(9, 90)],
-        [10, new Order(10, 100)],
+        [10, new Order(10, 100)]
     ]);
 
     createRandomOrder = () => {

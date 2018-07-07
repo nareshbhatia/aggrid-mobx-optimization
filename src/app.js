@@ -6,9 +6,9 @@ import { OrderStore } from './order-store';
 const orderStore = new OrderStore();
 
 // Create orders every 5 seconds
-// setInterval(function() {
-//     orderStore.createRandomOrder();
-// }, 5000);
+setInterval(function() {
+    orderStore.createRandomOrder();
+}, 5000);
 
 // Update orders every second
 setInterval(function() {
