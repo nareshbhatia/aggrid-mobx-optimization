@@ -1,6 +1,6 @@
 import React from 'react';
 import { AgGridReact } from 'ag-grid-react';
-import { autorun } from 'mobx';
+import { observe, reaction, toJS } from 'mobx';
 import { inject } from 'mobx-react';
 
 import 'ag-grid/dist/styles/ag-grid.css';
@@ -13,48 +13,43 @@ export const OrderTable = inject('orderStore')(
             super(props);
 
             const { orderStore } = props;
-            this.disposer = autorun(() => {
-                console.log(
-                    'autorun() triggered. gridApi:',
-                    this.gridApi ? true : false
-                );
-
-                // This will trigger the autorun whenever orderMap changes,
-                // specifically when orders are added.
-                const orders = Array.from(orderStore.orderMap.values());
-
-                // This will trigger the autorun whenever an order changes.
-                // It's kind of odd to dereference order just to trigger a reaction!
-                orders.forEach(order => {
-                    const quantity = order.quantity;
-                });
-
-                // Update ag-grid when an order is added or updated.
-                // This is very inefficient because it iterates over all orders!
-                // It would be good to separate adds from updates.
-                if (this.gridApi) {
-                    const addedRows = [];
-                    const updatedRows = [];
-
-                    orders.forEach(order => {
-                        const rowNode = this.gridApi.getRowNode(order.id);
-                        if (rowNode) {
-                            updatedRows.push(order);
-                        } else {
-                            addedRows.push(order);
+            this.orderMapDisposer = observe(orderStore.orderMap, event => {
+                const jsOrders = [];
+                let order;
+                switch (event.type) {
+                    case 'add':
+                        order = event.newValue;
+                        this.trackOrder(order);
+                        jsOrders.push(toJS(order));
+                        if (this.gridApi) {
+                            this.gridApi.updateRowData({ add: jsOrders });
                         }
-                    });
-
-                    this.gridApi.updateRowData({
-                        add: addedRows,
-                        update: updatedRows
-                    });
+                        break;
+                    case 'update':
+                        console.log('This should never be called');
+                        break;
+                    case 'delete':
+                        order = event.oldValue;
+                        this.untrackOrder(order);
+                        jsOrders.push(toJS(order));
+                        if (this.gridApi) {
+                            this.gridApi.updateRowData({ remove: jsOrders });
+                        }
+                        break;
+                    default:
+                        break;
                 }
             });
+
+            // Keep a map of disposers for each order
+            this.discreteOrderDisposerMap = new Map();
         }
 
         componentWillUnmount() {
-            this.disposer();
+            this.orderMapDisposer();
+            Array.from(this.discreteOrderDisposerMap.values()).map(disposer =>
+                disposer()
+            );
         }
 
         render() {
@@ -89,10 +84,53 @@ export const OrderTable = inject('orderStore')(
         onGridReady = params => {
             this.gridApi = params.api;
             this.columnApi = params.columnApi;
+
+            // Add initial set of rows to ag-grid
+            const { orderStore } = this.props;
+            const orders = Array.from(orderStore.orderMap.values());
+            const jsOrders = [];
+            orders.forEach(order => {
+                this.trackOrder(order);
+                jsOrders.push(toJS(order));
+            });
+
+            this.gridApi.updateRowData({ add: jsOrders });
         };
 
         getRowNodeId = data => {
             return data.id;
         };
+
+        trackOrder(order) {
+            console.log(`Track ${order.id}:\n${stringify(order)}`);
+
+            const orderDisposer = reaction(
+                () => toJS(order),
+                jsOrder => {
+                    console.log(`Update ${order.id}:\n${stringify(order)}`);
+                    const jsOrders = [];
+                    jsOrders.push(jsOrder);
+                    this.gridApi.updateRowData({ update: jsOrders });
+                }
+            );
+            this.discreteOrderDisposerMap.set(order.id, orderDisposer);
+        }
+
+        untrackOrder(order) {
+            console.log(`Untrack ${order.id}:\n${stringify(order)}`);
+
+            const disposer = this.discreteOrderDisposerMap.get(order.id);
+            if (disposer) {
+                // Dispose the observer
+                disposer();
+
+                // Delete the entry
+                this.discreteOrderDisposerMap.delete(order.id);
+            }
+        }
     }
 );
+
+function stringify(object) {
+    return JSON.stringify(object, null, 4);
+}
